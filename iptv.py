@@ -1,69 +1,37 @@
+import http.server
+import socketserver
 import os
-import socket
-from flask import Flask, Response, abort
-from pyngrok import ngrok, conf
-from threading import Thread
 
-app = Flask(__name__)
+# === CONFIG ===
+PORT = 8080
 
-# === SET YOUR NGROK AUTHTOKEN HERE ===
-NGROK_AUTHTOKEN = "30CtJdnEsiqHdY09PdvHaRZtmBr_89iYY9EkVFT7WwitbPNCD"
+m3u_path = input("📂 Enter FULL path to your .m3u file:\n").strip()
 
-def get_local_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-        s.close()
-    except Exception:
-        local_ip = "127.0.0.1"
-    return local_ip
+if not os.path.isfile(m3u_path):
+    print(f"❌ ERROR: File does not exist: {m3u_path}")
+    exit(1)
+else:
+    print(f"✅ Found: {m3u_path}")
 
-def ask_for_file():
-    while True:
-        path = input("📂 Enter FULL path to your .m3u file:\n").strip()
-        if os.path.isfile(path):
-            print(f"✅ Found: {path}")
-            return path
-        else:
-            print(f"❌ File not found! Try again.\n")
+# Get file name only
+file_name = os.path.basename(m3u_path)
+directory = os.path.dirname(m3u_path)
 
-M3U_FILE_PATH = ask_for_file()
+# Change working dir to where the file is
+os.chdir(directory)
 
-@app.route('/playlist.m3u')
-def serve_m3u():
-    """Serve raw M3U"""
-    try:
-        with open(M3U_FILE_PATH, 'r', encoding='utf-8') as f:
-            content = f.read()
-        return Response(content, mimetype='audio/x-mpegurl')
-    except Exception as e:
-        print(f"❌ ERROR reading file: {e}")
-        abort(500)
+class MyHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/playlist.m3u':
+            self.path = '/' + file_name
+        return http.server.SimpleHTTPRequestHandler.do_GET(self)
 
-if __name__ == '__main__':
-    HOST = '0.0.0.0'
-    PORT = 8080
-    LOCAL_IP = get_local_ip()
+# Start server
+with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
+    print("\n🚀 Serving IPTV .m3u file!")
+    print(f"🔗 Local:  http://localhost:{PORT}/playlist.m3u")
+    print(f"🔗 LAN:    http://<YOUR_LOCAL_IP>:{PORT}/playlist.m3u")
+    print(f"\n🌍 Use with ngrok: `ngrok http {PORT}`")
+    print("\nPress CTRL+C to stop server.\n")
 
-    # Configure ngrok with your token automatically
-    conf.get_default().auth_token = NGROK_AUTHTOKEN
-
-    print("\n🚀 IPTV Playlist Server starting...")
-    print(f"📂 Serving: {M3U_FILE_PATH}")
-    print(f"🔗 Local:   http://localhost:{PORT}/playlist.m3u")
-    print(f"🔗 LAN:     http://{LOCAL_IP}:{PORT}/playlist.m3u")
-
-    # Start Flask in background
-    def run_flask():
-        app.run(host=HOST, port=PORT)
-
-    Thread(target=run_flask, daemon=True).start()
-
-    # Start ngrok tunnel
-    print("\n🌍 Starting ngrok tunnel automatically...")
-    public_url = ngrok.connect(PORT, "http")
-    print(f"✅ Public ngrok link: {public_url}/playlist.m3u")
-    print("\n💡 Share this link worldwide. CTRL+C to stop.\n")
-
-    input("Press ENTER to stop server...\n")
+    httpd.serve_forever()
